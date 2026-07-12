@@ -57,6 +57,7 @@ export default function App() {
   // Search and filter state
   const [skillsSearch, setSkillsSearch] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"bento" | "matrix">("bento");
+  const [sortBy, setSortBy] = useState<"score" | "experience" | "name" | "recency">("score");
 
   // Interaction loaders
   const [uploading, setUploading] = useState(false);
@@ -279,14 +280,57 @@ export default function App() {
     return "Potential Growth";
   };
 
-  // Filtered resumes based on skills search
-  const filteredResumes = resumes.filter(r => {
-    if (!skillsSearch.trim()) return true;
-    const term = skillsSearch.toLowerCase();
-    const skillsMatch = r.summary.skills.some(s => s.toLowerCase().includes(term));
-    const nameMatch = r.summary.candidateName.toLowerCase().includes(term);
-    return skillsMatch || nameMatch;
-  });
+  // Extract and compare candidate skills with the current Job Description
+  const getSkillsAlignment = (skills: string[], jdText: string) => {
+    if (!jdText) return { matched: [], unmatched: skills };
+    const jdLower = jdText.toLowerCase();
+    const matched: string[] = [];
+    const unmatched: string[] = [];
+
+    skills.forEach(skill => {
+      const cleanSkill = skill.toLowerCase().trim();
+      // Remove small numbers or version markers like "React 19" -> "react", "NodeJS" -> "node"
+      const alphaOnly = cleanSkill.replace(/[\d.\s]+/g, "");
+      
+      if (
+        jdLower.includes(cleanSkill) || 
+        (alphaOnly.length > 2 && jdLower.includes(alphaOnly))
+      ) {
+        matched.push(skill);
+      } else {
+        unmatched.push(skill);
+      }
+    });
+
+    return { matched, unmatched };
+  };
+
+  // Filtered and sorted resumes
+  const filteredResumes = resumes
+    .filter(r => {
+      if (!skillsSearch.trim()) return true;
+      const term = skillsSearch.toLowerCase();
+      const skillsMatch = r.summary.skills.some(s => s.toLowerCase().includes(term));
+      const nameMatch = r.summary.candidateName.toLowerCase().includes(term);
+      return skillsMatch || nameMatch;
+    })
+    .sort((a, b) => {
+      if (sortBy === "score") {
+        return b.summary.suitabilityScore - a.summary.suitabilityScore;
+      }
+      if (sortBy === "experience") {
+        return b.summary.experienceYears - a.summary.experienceYears;
+      }
+      if (sortBy === "name") {
+        return a.summary.candidateName.localeCompare(b.summary.candidateName);
+      }
+      if (sortBy === "recency") {
+        const dateA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+        const dateB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+        return dateB - dateA;
+      }
+      return 0;
+    });
 
   const selectedResume = resumes.find(r => r.id === selectedResumeId);
 
@@ -484,29 +528,46 @@ export default function App() {
 
         {/* Filter and View Layout Controls */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-800/60 pb-4">
-          <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
-            <button
-              onClick={() => setActiveTab("bento")}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                activeTab === "bento"
-                  ? "bg-slate-800 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              Interactive Bento
-            </button>
-            <button
-              onClick={() => setActiveTab("matrix")}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                activeTab === "matrix"
-                  ? "bg-slate-800 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              Side-by-Side Matrix
-            </button>
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
+              <button
+                onClick={() => setActiveTab("bento")}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  activeTab === "bento"
+                    ? "bg-slate-800 text-white shadow"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Interactive Bento
+              </button>
+              <button
+                onClick={() => setActiveTab("matrix")}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  activeTab === "matrix"
+                    ? "bg-slate-800 text-white shadow"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Side-by-Side Matrix
+              </button>
+            </div>
+
+            {/* Dynamic Sort Control */}
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs shrink-0">
+              <span className="text-slate-500 font-medium">Sort by:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-transparent border-none text-slate-300 font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                <option value="score" className="bg-slate-950">Match Score</option>
+                <option value="experience" className="bg-slate-950">Years of Experience</option>
+                <option value="name" className="bg-slate-950">Name (A-Z)</option>
+                <option value="recency" className="bg-slate-950">Upload Date</option>
+              </select>
+            </div>
           </div>
 
           {/* Core Text Filter */}
@@ -727,23 +788,65 @@ export default function App() {
 
                       {/* Technical Skills Tag Cloud */}
                       <div className="md:col-span-6 bg-slate-900/30 border border-slate-900 rounded-3xl p-5 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                            <Layers className="w-4 h-4 text-cyan-400" /> Extracted Skills
-                          </h3>
-                          <span className="text-[10px] text-slate-500 font-mono font-bold">({selectedResume.summary.skills.length} identified)</span>
-                        </div>
+                        {(() => {
+                          const { matched, unmatched } = getSkillsAlignment(selectedResume.summary.skills, customJDText);
+                          return (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                  <Layers className="w-4 h-4 text-cyan-400" /> Extracted Skills
+                                </h3>
+                                <span className="text-[10px] text-slate-500 font-mono font-bold">
+                                  ({selectedResume.summary.skills.length} identified)
+                                </span>
+                              </div>
 
-                        <div className="flex flex-wrap gap-1.5">
-                          {selectedResume.summary.skills.map((skill, idx) => (
-                            <span 
-                              key={idx}
-                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 hover:border-slate-700 hover:text-teal-400 rounded-xl text-xs font-medium text-slate-300 transition duration-150"
-                            >
-                              {skill}
-                            </span>
-                          ))}
-                        </div>
+                              <div className="space-y-3.5">
+                                {/* Aligned skills */}
+                                {matched.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
+                                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                        Target Job-Fit Matches ({matched.length})
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {matched.map((skill, idx) => (
+                                        <span 
+                                          key={`m-${idx}`}
+                                          className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/35 text-emerald-300 rounded-lg text-xs font-semibold flex items-center gap-1"
+                                        >
+                                          <Check className="w-3 h-3 text-emerald-400" />
+                                          {skill}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Additional competencies */}
+                                {unmatched.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                      Other Core Competencies ({unmatched.length})
+                                    </span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {unmatched.map((skill, idx) => (
+                                        <span 
+                                          key={`u-${idx}`}
+                                          className="px-2 py-0.5 bg-slate-950 border border-slate-800 text-slate-300 rounded-lg text-xs font-medium hover:border-slate-700 transition"
+                                        >
+                                          {skill}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -901,10 +1004,8 @@ export default function App() {
       </main>
 
       {/* Humble footer */}
-      <footer className="border-t border-slate-900/60 py-6 text-center text-[11px] text-slate-600 font-mono mt-12">
-        <span>System Status: Fully Operational</span>
-        <span className="mx-2">•</span>
-        <span>Made with Gemini 3.5 Flash</span>
+      <footer className="border-t border-slate-900/60 py-6 text-center text-xs text-slate-500 mt-12">
+        <span>Resume Parsing Dashboard powered by Gemini 3.5 Flash</span>
       </footer>
     </div>
   );
