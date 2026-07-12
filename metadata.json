@@ -1,6 +1,6 @@
 {
   "name": "Standup_Summarizer",
-  "description": "Vikram\u0027s dashboard to centrally collect, parse, and segregate team daily standup messages using Gemini AI and Supabase.",
+  "description": "Vikram's dashboard to centrally upload, parse, and compare candidate resumes using Gemini AI.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

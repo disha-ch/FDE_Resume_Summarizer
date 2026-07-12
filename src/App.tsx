@@ -1,686 +1,910 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Loader2, 
-  CheckCircle, 
-  Clock, 
-  ListTodo, 
-  ShieldAlert, 
-  Sparkles, 
-  RotateCcw, 
+  CheckCircle2, 
   Trash2, 
   Copy, 
+  Check, 
   Search, 
-  Users, 
   RefreshCw, 
   FileText, 
   AlertTriangle, 
-  History, 
-  Calendar 
+  Calendar,
+  UploadCloud,
+  Sparkles,
+  Layers,
+  Briefcase,
+  GraduationCap,
+  TrendingUp,
+  User,
+  Mail,
+  Phone,
+  FileSpreadsheet,
+  Plus,
+  Info
 } from "lucide-react";
-import { RawMessage, TeamMember, Ticket, SegregatedResult } from "./types";
+import { motion, AnimatePresence } from "motion/react";
+import { ResumeAnalysis } from "./types";
+
+// Standard preset JDs to make testing easy and professional
+const JD_PRESETS = [
+  {
+    title: "Senior Full-Stack Engineer",
+    text: "We are seeking a senior engineer with strong React, Node.js, and TypeScript skills to build scalable enterprise apps, optimize database queries, and establish containerized CI/CD pipelines."
+  },
+  {
+    title: "Senior UI/UX Product Designer",
+    text: "Looking for an expert designer who is a master of Figma design systems, conducts exhaustive user research studies, and builds high-fidelity interactive SaaS prototypes."
+  },
+  {
+    title: "AI / Machine Learning Scientist",
+    text: "Seeking a deep learning specialist fluent in Python, PyTorch, SQL, and LLMs who can engineer and deploy modern predictive models and Retrieval-Augmented Generation (RAG) pipelines."
+  },
+  {
+    title: "General Tech Contributor",
+    text: ""
+  }
+];
 
 export default function App() {
-  // App Dashboard State
-  const [team, setTeam] = useState<TeamMember[]>([]);
-  const [totalPending, setTotalPending] = useState(0);
-  const [history, setHistory] = useState<Ticket[]>([]);
-  const [selectedUser, setSelectedUser] = useState<TeamMember | null>(null);
-  const [selectedUserMessages, setSelectedUserMessages] = useState<RawMessage[]>([]);
+  const [resumes, setResumes] = useState<ResumeAnalysis[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
   
-  // Active processed state for currently selected user
-  const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
-  const [processingUser, setProcessingUser] = useState(false);
-  const [processingError, setProcessingError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [copiedText, setCopiedText] = useState(false);
+  // Custom job description setup
+  const [selectedJDPreset, setSelectedJDPreset] = useState<string>("Senior Full-Stack Engineer");
+  const [customJDText, setCustomJDText] = useState<string>(JD_PRESETS[0].text);
+  
+  // Search and filter state
+  const [skillsSearch, setSkillsSearch] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"bento" | "matrix">("bento");
 
-  // Modal / Historical View State
-  const [viewingHistoryTicket, setViewingHistoryTicket] = useState<Ticket | null>(null);
+  // Interaction loaders
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [statusMsg, setStatusMsg] = useState("Initializing analyzer...");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Fetch Dashboard State
-  const fetchDashboardStatus = async () => {
+  // Copy indicators
+  const [copiedEmailId, setCopiedEmailId] = useState<string | null>(null);
+  const [copiedPhoneId, setCopiedPhoneId] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+
+  // Sync / Fetch existing resumes from the database
+  const loadResumes = async () => {
     try {
-      const res = await fetch("/api/dashboard/status");
-      const data = await res.json();
-      if (data && data.team) {
-        setTeam(data.team);
-        setTotalPending(data.totalPendingCount);
-      }
-    } catch (err) {
-      console.error("Error fetching dashboard status", err);
-    }
-  };
-
-  // Fetch History Logs
-  const fetchHistory = async () => {
-    try {
-      const res = await fetch("/api/dashboard/history");
+      const res = await fetch("/api/resumes");
       const data = await res.json();
       if (Array.isArray(data)) {
-        setHistory(data);
+        setResumes(data);
+        if (data.length > 0 && !selectedResumeId) {
+          setSelectedResumeId(data[0].id);
+        }
       }
-    } catch (err) {
-      console.error("Error fetching tickets history", err);
+    } catch (e) {
+      console.error("Error loading resumes:", e);
+      setErrorMsg("Failed to communicate with database. Running in local fallback state.");
     }
   };
 
-  // Synchronize on mount
   useEffect(() => {
-    fetchDashboardStatus();
-    fetchHistory();
+    loadResumes();
   }, []);
 
-  // Fetch individual user messages when selected
-  useEffect(() => {
-    if (selectedUser) {
-      fetch(`/api/dashboard/messages/${selectedUser.id}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.messages) {
-            setSelectedUserMessages(data.messages);
-            // Clear current active preview to not show stale data
-            setActiveTicket(null);
-            setProcessingError(null);
-          }
-        })
-        .catch((err) => console.error("Error loading user messages", err));
-    }
-  }, [selectedUser]);
-
-  // Trigger Gemini Segregation
-  const triggerSegregator = async () => {
-    if (!selectedUser) return;
-    setProcessingUser(true);
-    setProcessingError(null);
-    setActiveTicket(null);
-
-    try {
-      const res = await fetch("/api/dashboard/segregate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ userId: selectedUser.id }),
-      });
-
-      if (!res.ok) {
-        const errDetail = await res.json();
-        throw new Error(errDetail.error || "Gemini could not segregate user messages");
-      }
-
-      const generatedTicket = await res.json();
-      setActiveTicket(generatedTicket);
-      
-      // Update our team list counts and historical ticket views
-      fetchDashboardStatus();
-      fetchHistory();
-    } catch (err: any) {
-      console.error(err);
-      setProcessingError(err.message || "Something went wrong during Gemini processing");
-    } finally {
-      setProcessingUser(false);
+  // Update preset text when preset changes
+  const handlePresetChange = (title: string) => {
+    setSelectedJDPreset(title);
+    const preset = JD_PRESETS.find(p => p.title === title);
+    if (preset) {
+      setCustomJDText(preset.text);
     }
   };
 
-  // Reset entire state pool to defaults
-  const resetStatePool = async () => {
-    if (!window.confirm("Are you sure you want to reset the message pool back to initial state? This will clear processed stats.")) {
-      return;
-    }
-    try {
-      await fetch("/api/dashboard/reset", { method: "POST" });
-      setSelectedUser(null);
-      setActiveTicket(null);
-      fetchDashboardStatus();
-      fetchHistory();
-    } catch (err) {
-      console.error("Error resetting data", err);
-    }
-  };
-
-  // Delete specific ticket from history log
-  const deleteTicket = async (ticketId: string, e: React.MouseEvent) => {
+  // Delete resume
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`Are you sure you want to delete ticket ${ticketId} from the history log?`)) {
-      return;
-    }
+    if (!window.confirm("Are you sure you want to delete this analyzed resume?")) return;
+    
     try {
-      const res = await fetch(`/api/dashboard/history/${ticketId}`, { method: "DELETE" });
-      if (res.ok) {
-        if (viewingHistoryTicket?.id === ticketId) {
-          setViewingHistoryTicket(null);
-        }
-        fetchHistory();
+      const res = await fetch(`/api/resumes/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setResumes(prev => {
+          const updated = prev.filter(r => r.id !== id);
+          if (selectedResumeId === id) {
+            setSelectedResumeId(updated.length > 0 ? updated[0].id : null);
+          }
+          return updated;
+        });
+        setSuccessMsg("Resume deleted from dashboard.");
+        setTimeout(() => setSuccessMsg(null), 3000);
       }
     } catch (err) {
-      console.error("Error removing ticket", err);
+      console.error("Error deleting resume:", err);
+      setErrorMsg("Failed to delete resume.");
     }
   };
 
-  // Helper copy function
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedText(true);
-    setTimeout(() => setCopiedText(false), 2000);
+  // Reset/Restore to seeds
+  const handleReset = async () => {
+    if (!window.confirm("Reset dashboard back to default seeded resumes? This will clean custom uploads.")) return;
+    try {
+      const res = await fetch("/api/resumes/reset", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        loadResumes();
+        setSelectedResumeId("seed-1");
+        setSuccessMsg("Dashboard successfully restored to demo examples.");
+        setTimeout(() => setSuccessMsg(null), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to reset database:", err);
+      setErrorMsg("Failed to reset database.");
+    }
   };
 
-  // Filter historical tickets
-  const filteredHistory = history.filter((ticket) => {
-    const term = searchTerm.toLowerCase();
-    return (
-      ticket.sender.toLowerCase().includes(term) ||
-      ticket.id.toLowerCase().includes(term) ||
-      ticket.segregated.summary.toLowerCase().includes(term)
-    );
+  // Base64 file reader and poster
+  const processFile = async (file: File) => {
+    // Constraint: Max 5 resumes custom uploaded at a time
+    const uploadedCustomCount = resumes.filter(r => !r.id.startsWith("seed-")).length;
+    if (uploadedCustomCount >= 5) {
+      setErrorMsg("Maximum limit of 5 analyzed resumes reached. Please delete an existing profile to analyze a new candidate.");
+      return;
+    }
+
+    // Supported formats
+    const supportedTypes = ["application/pdf", "text/plain", "image/png", "image/jpeg", "image/jpg"];
+    if (!supportedTypes.includes(file.type) && !file.name.endsWith(".txt")) {
+      setErrorMsg("Unsupported file format. Please upload a PDF, Plain Text (.txt), or high-contrast image (PNG/JPG) resume.");
+      return;
+    }
+
+    // Size limit 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg("File is too large. Please upload a resume under 5MB.");
+      return;
+    }
+
+    setErrorMsg(null);
+    setUploading(true);
+    setUploadProgress(15);
+    setStatusMsg("Reading file content...");
+
+    // Smooth simulated loading bar
+    const progressTimer = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) {
+          return prev;
+        }
+        if (prev < 40) {
+          setStatusMsg("Sending base64 package to Gemini 3.5 Flash...");
+          return prev + 5;
+        } else if (prev < 70) {
+          setStatusMsg("Parsing candidate work timeline...");
+          return prev + 3;
+        } else {
+          setStatusMsg("Evaluating matching scores and strengths...");
+          return prev + 1;
+        }
+      });
+    }, 250);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64String = reader.result as string;
+        
+        const response = await fetch("/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileBase64: base64String,
+            fileName: file.name,
+            fileSize: `${Math.round(file.size / 1024)} KB`,
+            mimeType: file.type || "text/plain",
+            jobDescription: customJDText
+          })
+        });
+
+        clearInterval(progressTimer);
+        setUploadProgress(100);
+
+        if (!response.ok) {
+          throw new Error("Server failed to parse and generate candidate summary.");
+        }
+
+        const newAnalysis = await response.json();
+        
+        setResumes(prev => [newAnalysis, ...prev]);
+        setSelectedResumeId(newAnalysis.id);
+        setUploading(false);
+        setSuccessMsg(`Successfully processed ${newAnalysis.summary.candidateName}!`);
+        setTimeout(() => setSuccessMsg(null), 4000);
+      } catch (err: any) {
+        clearInterval(progressTimer);
+        setUploading(false);
+        console.error("Upload error:", err);
+        setErrorMsg(err.message || "An error occurred during Gemini summarization.");
+      }
+    };
+
+    reader.onerror = () => {
+      clearInterval(progressTimer);
+      setUploading(false);
+      setErrorMsg("Failed to read local file.");
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  // Drag-and-drop triggers
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      processFile(e.target.files[0]);
+    }
+  };
+
+  // Helpers for layout colors
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
+    if (score >= 80) return "text-cyan-400 border-cyan-500/30 bg-cyan-500/10";
+    return "text-amber-400 border-amber-500/30 bg-amber-500/10";
+  };
+
+  const getScoreBadge = (score: number) => {
+    if (score >= 90) return "Strong Fit";
+    if (score >= 80) return "Good Match";
+    return "Potential Growth";
+  };
+
+  // Filtered resumes based on skills search
+  const filteredResumes = resumes.filter(r => {
+    if (!skillsSearch.trim()) return true;
+    const term = skillsSearch.toLowerCase();
+    const skillsMatch = r.summary.skills.some(s => s.toLowerCase().includes(term));
+    const nameMatch = r.summary.candidateName.toLowerCase().includes(term);
+    return skillsMatch || nameMatch;
   });
 
-  // Render Dashboard
+  const selectedResume = resumes.find(r => r.id === selectedResumeId);
+
+  // Copy helpers
+  const copyText = (text: string, type: "email" | "phone", id: string) => {
+    navigator.clipboard.writeText(text);
+    if (type === "email") {
+      setCopiedEmailId(id);
+      setTimeout(() => setCopiedEmailId(null), 1500);
+    } else {
+      setCopiedPhoneId(id);
+      setTimeout(() => setCopiedPhoneId(null), 1500);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Banner Header */}
-      <header className="bg-slate-900 border-b border-slate-800 py-4 px-6 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-white">
+      {/* Top Banner / Navigation */}
+      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-tr from-teal-500 to-emerald-500 rounded-xl text-slate-950 font-bold">
-              <Sparkles className="w-5 h-5" />
+            <div className="p-2.5 bg-teal-500/10 border border-teal-500/20 rounded-xl text-teal-400">
+              <Sparkles className="w-6 h-6 animate-pulse" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-white tracking-tight">Standup_Summarizer</h1>
-                <span className="text-[10px] bg-teal-500/10 border border-teal-500/20 text-teal-400 font-mono px-2 py-0.5 rounded-full uppercase">
-                  Gemini v3.5
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">Vikram&apos;s team reporting central dashboard</p>
+              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                Resume_Summarizer <span className="text-[10px] uppercase tracking-widest font-mono bg-teal-500/10 text-teal-300 px-2 py-0.5 rounded border border-teal-500/20">AI Screening</span>
+              </h1>
+              <p className="text-xs text-slate-400">Centrally parse, evaluate, and compare candidates with Gemini 3.5 Flash</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-mono hidden md:inline">
+              Custom Uploads: <strong className="text-teal-400">{resumes.filter(r => !r.id.startsWith("seed-")).length}</strong> / 5
+            </span>
+            <span className="h-4 w-px bg-slate-800 hidden md:block"></span>
+            
             <button
-              onClick={resetStatePool}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer font-medium"
-              title="Reset pending pool back to original circled numbers"
+              onClick={handleReset}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-600 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition duration-150 cursor-pointer"
+              title="Reset candidates to original demo presets"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-orange-400" />
-              Reset Message Pool
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reset Seeds
             </button>
-
-            <button
-              onClick={fetchDashboardStatus}
-              className="p-1.5 bg-slate-800 hover:bg-slate-755 border border-slate-700 text-slate-300 rounded-xl hover:text-white transition"
-              title="Refresh Pool counts"
-            >
-              <RefreshCw className="w-4 h-4 text-emerald-400" />
-            </button>
-
-            <div className="h-6 w-px bg-slate-800 hidden sm:block"></div>
-
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex flex-col text-right">
-                <span className="text-xs text-slate-300 font-semibold font-mono">
-                  Vikram (Manager)
-                </span>
-                <span className="text-[10px] text-emerald-400 flex items-center gap-1 justify-end font-mono">
-                  ● Public Access Mode
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </header>
 
-      {/* Main Container Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* LEFT COLUMN: TEAM MEMBERS POOL (Cols: 3) */}
-        <div className="lg:col-span-3 lg:col-start-1 flex flex-col space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-teal-400" />
-                Team Standup Pools
-              </h2>
-              <span className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">
-                {totalPending} Raw Msg.
-              </span>
-            </div>
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {/* Alerts and notifications */}
+        <AnimatePresence>
+          {errorMsg && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -10 }}
+              className="p-4 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-rose-300 text-sm flex items-start gap-3 shadow-lg"
+            >
+              <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold block text-rose-200">Processing Issue</span>
+                <span>{errorMsg}</span>
+              </div>
+              <button onClick={() => setErrorMsg(null)} className="text-rose-400 hover:text-white text-xs shrink-0 cursor-pointer">Dismiss</button>
+            </motion.div>
+          )}
 
-            <p className="text-xs text-slate-400 italic">
-              Each user card lists pending slack strings. Red/Blue indicates un-analyzed messages waiting for segregation.
+          {successMsg && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -10 }}
+              className="p-4 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl text-emerald-300 text-sm flex items-center gap-3 shadow-lg"
+            >
+              <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+              <span>{successMsg}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Configuration Segment (Role Alignment & Job Description) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-slate-900/40 rounded-3xl border border-slate-800 p-6">
+          <div className="lg:col-span-5 space-y-4">
+            <h3 className="text-sm font-semibold text-teal-400 flex items-center gap-2 uppercase tracking-wider">
+              <Layers className="w-4 h-4" /> 1. Target Role Alignment
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              When you upload a resume, Gemini evaluates candidate experience, selects core matches, and scores them specifically based on this Target Job Profile.
             </p>
 
-            <div className="space-y-2 mt-2">
-              {team.map((member) => {
-                const isSelected = selectedUser?.id === member.id;
-                return (
+            <div className="space-y-2">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Preset Roles</label>
+              <div className="flex flex-wrap gap-1.5">
+                {JD_PRESETS.map((p) => (
                   <button
-                    key={member.id}
-                    onClick={() => {
-                      setSelectedUser(member);
-                    }}
-                    className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 flex items-center justify-between cursor-pointer group ${
-                      isSelected
-                        ? "bg-gradient-to-r from-slate-800 to-slate-850 border-teal-500 shadow-lg shadow-teal-500/5 text-white"
-                        : "bg-slate-950/40 hover:bg-slate-900/60 border-slate-800 text-slate-300"
+                    key={p.title}
+                    onClick={() => handlePresetChange(p.title)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer border ${
+                      selectedJDPreset === p.title
+                        ? "bg-teal-500/20 border-teal-500/60 text-teal-300"
+                        : "bg-slate-950/80 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-300"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800 group-hover:scale-110 transition">
-                        {member.avatar}
-                      </span>
-                      <div>
-                        <div className="text-sm font-bold group-hover:text-white transition">{member.name}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">ID: {member.id}</div>
-                      </div>
-                    </div>
-
-                    {/* Circle notification representing raw count as in diagram */}
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center border text-xs font-mono font-bold ${
-                      member.pendingCount > 0 
-                        ? isSelected 
-                          ? "bg-teal-500 text-slate-950 border-teal-400 scale-110"
-                          : "bg-teal-500/15 text-teal-400 border-teal-500/30 font-bold"
-                        : "bg-slate-900 text-slate-600 border-slate-800 font-normal"
-                    }`}>
-                      {member.pendingCount}
-                    </div>
+                    {p.title}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Quick Metrics Panel */}
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 text-teal-400" />
-              Reporting Coverage
-            </h3>
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <div className="bg-slate-950/40 border border-slate-800/60 p-2.5 rounded-xl text-center">
-                <div className="text-lg font-bold text-teal-400 font-mono">{team.filter(m => m.pendingCount === 0).length} / 7</div>
-                <div className="text-[10px] text-slate-500">Processed Users</div>
-              </div>
-              <div className="bg-slate-950/40 border border-slate-800/60 p-2.5 rounded-xl text-center">
-                <div className="text-lg font-bold text-indigo-400 font-mono">{history.length}</div>
-                <div className="text-[10px] text-slate-500">Hist. Summaries</div>
-              </div>
+          <div className="lg:col-span-7 flex flex-col space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Target Job Description Criteria</label>
+              {selectedJDPreset !== "General Tech Contributor" && (
+                <span className="text-[10px] text-teal-500 font-mono">Linked to Gemini Prompt</span>
+              )}
             </div>
+            
+            <textarea
+              className="flex-1 w-full min-h-[90px] p-3.5 bg-slate-950 border border-slate-800 rounded-2xl text-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500/50 resize-none font-sans leading-relaxed placeholder-slate-600"
+              placeholder="Paste a custom target Job Description here to trigger precise alignment scoring (e.g. key frameworks, years of experience, or degree qualifications)..."
+              value={customJDText}
+              onChange={(e) => {
+                setCustomJDText(e.target.value);
+                setSelectedJDPreset("Custom Profile");
+              }}
+            />
           </div>
         </div>
 
-        {/* MIDDLE COLUMNS: DETAIL & MINI-BLOCKS SEGREGATOR (Cols: 5) */}
-        <div className="lg:col-span-5 flex flex-col space-y-6">
-          {!selectedUser ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center flex-1 flex flex-col items-center justify-center space-y-4">
-              <div className="inline-flex p-4 bg-teal-500/5 rounded-3xl border border-teal-500/10 text-teal-400/80 animate-bounce">
-                <Sparkles className="w-10 h-10" />
-              </div>
-              <div className="max-w-sm space-y-2">
-                <h2 className="text-lg font-sans font-bold text-white tracking-tight">Select Team Member to Auditing</h2>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Vikram, select any team member card on the left panel to review their raw slack strings updates pool, run the <b>Gemini Segregator</b>, and look at the mini dashboards.
-                </p>
-              </div>
-
-              {/* General Project Context Banner */}
-              <div className="w-full bg-slate-950/50 p-4 rounded-xl border border-slate-800 text-left text-xs text-slate-400 space-y-2">
-                <h4 className="font-bold text-slate-300">How the Segregator Works</h4>
-                <ol className="list-decimal pl-4 space-y-1 text-slate-400">
-                  <li>Choose a member (e.g., Kunal who has 10 pending slack updates).</li>
-                  <li>Click <b>Segregate Standup with Gemini</b> at the core.</li>
-                  <li>Gemini parses unstructured logs for four action cases: <b>Blockers</b>, <b>Plan (To Be Done)</b>, <b>Completed</b>, and <b>In Progress</b>.</li>
-                  <li>Summary is compiled for leadership reporting, and the counts automatically clear down into Vikram&apos;s history registry!</li>
-                </ol>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6 flex-1 flex flex-col justify-between">
+        {/* Upload Hub / Loading Screen */}
+        <AnimatePresence mode="wait">
+          {uploading ? (
+            <motion.div 
+              key="loading-upload"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-10 flex flex-col items-center justify-center text-center space-y-6 min-h-[240px] shadow-2xl relative overflow-hidden"
+            >
+              {/* Animated decorative particle */}
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-500 via-indigo-500 to-cyan-500 animate-pulse"></div>
               
-              {/* Selected User Header & Raw message preview */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl bg-slate-950 p-2 border border-slate-800 rounded-xl">{selectedUser.avatar}</span>
-                    <div>
-                      <h2 className="font-bold text-white tracking-tight text-base">{selectedUser.name}&apos;s Live Stream</h2>
-                      <p className="text-xs text-slate-400">Viewing {selectedUserMessages.length} unsegregated slack posts</p>
-                    </div>
-                  </div>
+              <div className="p-4 bg-teal-500/10 border border-teal-500/20 rounded-full text-teal-400 animate-bounce">
+                <Loader2 className="w-10 h-10 animate-spin" />
+              </div>
+              
+              <div className="space-y-2 max-w-md">
+                <h3 className="text-lg font-bold text-white tracking-tight">Processing Resume via Gemini</h3>
+                <p className="text-xs text-slate-400 font-mono">{statusMsg}</p>
+              </div>
 
-                  <span className="text-xs bg-slate-950 border border-slate-800 font-mono px-3 py-1 rounded-xl text-slate-300">
-                    {selectedUserMessages.length > 0 ? "⚠️ Pendings" : "✅ Clear"}
+              {/* Progress bar container */}
+              <div className="w-full max-w-sm bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800 p-0.5">
+                <div 
+                  className="bg-gradient-to-r from-teal-400 to-cyan-500 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="drag-drop"
+              onDragEnter={handleDrag}
+              onDragOver={handleDrag}
+              onDragLeave={handleDrag}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-3xl p-8 transition-all duration-200 text-center flex flex-col items-center justify-center cursor-pointer group ${
+                dragActive 
+                  ? "border-teal-400 bg-teal-500/5 shadow-2xl shadow-teal-500/5" 
+                  : "border-slate-800/80 hover:border-slate-700 bg-slate-900/20 hover:bg-slate-900/40"
+              }`}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input 
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.txt,.png,.jpg,.jpeg"
+                onChange={handleFileSelect}
+              />
+              <div className="p-4 bg-slate-950/80 border border-slate-800 group-hover:border-slate-700 rounded-2xl text-slate-400 group-hover:text-teal-400 mb-3.5 transition duration-150">
+                <UploadCloud className="w-8 h-8" />
+              </div>
+              <h4 className="text-sm font-semibold text-slate-200">Drag &amp; Drop Candidate Resume here</h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-md">
+                Supports <strong className="text-slate-300">PDF, Plain Text (.txt), or Resume images (PNG/JPG)</strong>. Maximum 5 custom uploaded resumes. Files are kept private in-memory.
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Filter and View Layout Controls */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-800/60 pb-4">
+          <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
+            <button
+              onClick={() => setActiveTab("bento")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                activeTab === "bento"
+                  ? "bg-slate-800 text-white shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              Interactive Bento
+            </button>
+            <button
+              onClick={() => setActiveTab("matrix")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                activeTab === "matrix"
+                  ? "bg-slate-800 text-white shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Side-by-Side Matrix
+            </button>
+          </div>
+
+          {/* Core Text Filter */}
+          <div className="relative w-full sm:max-w-xs">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Filter by name or key skill..."
+              className="w-full pl-9 pr-4 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 text-xs placeholder-slate-500 focus:outline-none focus:border-slate-700"
+              value={skillsSearch}
+              onChange={(e) => setSkillsSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Tab 1: Interactive Bento Layout */}
+        <AnimatePresence mode="wait">
+          {activeTab === "bento" && (
+            <motion.div
+              key="bento-view"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+            >
+              {/* Left Column: Candidate List */}
+              <div className="lg:col-span-4 space-y-3.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    Candidates ({filteredResumes.length})
                   </span>
                 </div>
 
-                {/* Conditional show raw updates */}
-                {selectedUserMessages.length > 0 ? (
-                  <div className="space-y-2 bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/80 max-h-48 overflow-y-auto">
-                    {selectedUserMessages.map((msg, i) => (
-                      <div key={msg.id || i} className="text-xs border-b border-slate-900 pb-2 last:border-0 last:pb-0 font-sans">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-slate-500 font-mono text-[9px]">{msg.timestamp}</span>
-                          <span className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${
-                            msg.keyword.toUpperCase() === "BLOCKER" ? "bg-rose-500/10 text-rose-400 border border-rose-500/10" :
-                            msg.keyword.toUpperCase() === "COMPLETED" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/10" :
-                            msg.keyword.toUpperCase() === "IN PROGRESS" ? "bg-sky-500/10 text-sky-400 border border-sky-500/10" :
-                            "bg-amber-500/10 text-amber-400 border border-amber-500/10"
-                          }`}>
-                            {msg.keyword}
-                          </span>
-                        </div>
-                        <p className="text-slate-300 leading-relaxed font-sans">{msg.text}</p>
-                      </div>
-                    ))}
+                {filteredResumes.length === 0 ? (
+                  <div className="p-8 border border-slate-900 rounded-3xl text-center space-y-2 bg-slate-950/40">
+                    <Info className="w-5 h-5 text-slate-600 mx-auto" />
+                    <p className="text-xs text-slate-500 font-medium">No candidates match your filters.</p>
                   </div>
                 ) : (
-                  <div className="p-4 bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-500">
-                    No active messages left in this user&apos;s data pool. Run reset to recreate sample.
-                  </div>
-                )}
+                  <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
+                    {filteredResumes.map((resume) => {
+                      const isSelected = selectedResumeId === resume.id;
+                      const badgeClass = getScoreColor(resume.summary.suitabilityScore);
+                      return (
+                        <div
+                          key={resume.id}
+                          onClick={() => setSelectedResumeId(resume.id)}
+                          className={`p-4 rounded-2xl border transition duration-150 cursor-pointer text-left relative group ${
+                            isSelected 
+                              ? "bg-slate-900 border-teal-500/30 shadow-lg" 
+                              : "bg-slate-900/30 border-slate-900 hover:border-slate-800"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h4 className="text-xs font-bold text-white group-hover:text-teal-300 transition">
+                                {resume.summary.candidateName}
+                              </h4>
+                              <p className="text-[10px] text-slate-500 font-mono mt-0.5">{resume.fileName}</p>
+                            </div>
 
-                {/* Central Action CTA */}
-                {selectedUserMessages.length > 0 && (
-                  <button
-                    onClick={triggerSegregator}
-                    disabled={processingUser}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-emerald-500 disabled:opacity-50 text-slate-950 text-sm font-bold rounded-xl shadow-lg hover:shadow-teal-500/10 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer border-t border-white/10"
-                  >
-                    {processingUser ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Processing &amp; Segregating via Gemini AI...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4 text-slate-950 animate-pulse" />
-                        <span>Run Google Gemini Segregator</span>
-                      </>
-                    )}
-                  </button>
+                            {/* Score Tag */}
+                            <div className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border uppercase shrink-0 ${badgeClass}`}>
+                              {resume.summary.suitabilityScore}%
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-3">
+                            <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-slate-600" />
+                              {new Date(resume.uploadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                            </span>
+
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-medium text-slate-500 uppercase bg-slate-950/60 px-2 py-0.5 rounded">
+                                {resume.summary.experienceYears} Years Exp
+                              </span>
+                              <button
+                                onClick={(e) => handleDelete(resume.id, e)}
+                                className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded transition duration-150 cursor-pointer"
+                                title="Remove analyzed profile"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
-              {/* ERROR STATE VIEW’ */}
-              {processingError && (
-                <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl space-y-1">
-                  <div className="flex items-center gap-2 text-rose-400 font-bold text-xs">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Gemini Processing Failure</span>
-                  </div>
-                  <p className="text-[11px] text-rose-300/80 leading-relaxed">{processingError}</p>
-                </div>
-              )}
+              {/* Right Column: Dynamic Candidate Profile (Bento-Grid) */}
+              <div className="lg:col-span-8">
+                {selectedResume ? (
+                  <div className="space-y-6">
+                    {/* Candidate Top Profile Header Card */}
+                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                      {/* Grid overlay background */}
+                      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(20,184,166,0.06),transparent_50%)]"></div>
 
-              {/* LOADER PLACEHOLDER VIEW’ */}
-              {processingUser && (
-                <div className="p-12 bg-slate-900 border border-slate-800 border-dashed rounded-2xl flex flex-col items-center justify-center space-y-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-teal-400" />
-                  <div className="text-center">
-                    <p className="text-xs font-bold text-white">Segregating unstructured updates...</p>
-                    <p className="text-[10px] text-slate-400">Invoking gemini-3.5-flash with custom Schema Type constraints</p>
-                  </div>
-                </div>
-              )}
-
-              {/* FOUR MINI SUB-DASHBOARD BLOCKS OR LIVE RESULTS (Active results) */}
-              {(activeTicket || viewingHistoryTicket) && (
-                <div className="space-y-4">
-                  {/* Executive summary banner card */}
-                  <div className="bg-gradient-to-b from-indigo-950/30 to-slate-900 border border-indigo-500/25 rounded-2xl p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs text-indigo-300 font-semibold uppercase tracking-wider">
-                        <Sparkles className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-                        Executive Summaries for Leadership
-                      </div>
-                      <button
-                        onClick={() => copyToClipboard((activeTicket || viewingHistoryTicket)!.segregated.summary)}
-                        className="text-[10px] bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white px-2 py-1 rounded-lg border border-slate-800 flex items-center gap-1 transition"
-                      >
-                        <Copy className="w-3 h-3 text-teal-400" />
-                        {copiedText ? "Copied!" : "Copy Summary"}
-                      </button>
-                    </div>
-                    <p className="text-xs text-indigo-100 italic leading-relaxed font-sans">
-                      &ldquo;{(activeTicket || viewingHistoryTicket)?.segregated.summary}&rdquo;
-                    </p>
-                  </div>
-
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    {(activeTicket || viewingHistoryTicket)?.sender}&apos;s Segregated Mini Notebook Panels
-                  </h3>
-
-                  {/* 4 Mini cards block! */}
-                  <div className="grid grid-cols-2 gap-3">
-                    
-                    {/* CASE 1: BLOCKER */}
-                    <div className="bg-slate-900 p-3.5 rounded-xl border border-rose-500/15 flex flex-col space-y-2">
-                      <div className="flex items-center gap-1.5 text-red-400 text-xs font-bold uppercase tracking-wider border-b border-slate-950 pb-1.5">
-                        <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-red-400" />
-                        <span>Blockers</span>
-                        <span className="ml-auto bg-red-400/10 text-red-400 text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono">
-                          {(activeTicket || viewingHistoryTicket)!.segregated.blockers.length}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5 flex-1 overflow-y-auto max-h-28">
-                        {(activeTicket || viewingHistoryTicket)!.segregated.blockers.length > 0 ? (
-                          (activeTicket || viewingHistoryTicket)!.segregated.blockers.map((blk, idx) => (
-                            <div key={idx} className="text-[11px] text-slate-300 flex items-start gap-1 font-sans">
-                              <span className="text-red-500 select-none">•</span>
-                              <span className="leading-tight">{blk}</span>
+                      <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <h2 className="text-xl font-bold text-white tracking-tight">{selectedResume.summary.candidateName}</h2>
+                            <div className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase border ${getScoreColor(selectedResume.summary.suitabilityScore)}`}>
+                              {getScoreBadge(selectedResume.summary.suitabilityScore)}
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-[10px] text-slate-500 italic mt-2">Zero reported blockers</div>
-                        )}
+                          </div>
+
+                          {/* Contact & Meta */}
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-slate-400 text-xs font-mono">
+                            {selectedResume.summary.candidateEmail && selectedResume.summary.candidateEmail !== "Not specified" && (
+                              <div className="flex items-center gap-1.5 hover:text-teal-300 transition">
+                                <Mail className="w-3.5 h-3.5 text-slate-500" />
+                                <span>{selectedResume.summary.candidateEmail}</span>
+                                <button 
+                                  onClick={() => copyText(selectedResume.summary.candidateEmail, "email", selectedResume.id)} 
+                                  className="p-1 hover:bg-slate-800 rounded transition shrink-0 cursor-pointer"
+                                  title="Copy email"
+                                >
+                                  {copiedEmailId === selectedResume.id ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            {selectedResume.summary.candidatePhone && selectedResume.summary.candidatePhone !== "Not specified" && (
+                              <div className="flex items-center gap-1.5 hover:text-teal-300 transition">
+                                <Phone className="w-3.5 h-3.5 text-slate-500" />
+                                <span>{selectedResume.summary.candidatePhone}</span>
+                                <button 
+                                  onClick={() => copyText(selectedResume.summary.candidatePhone, "phone", selectedResume.id)} 
+                                  className="p-1 hover:bg-slate-800 rounded transition shrink-0 cursor-pointer"
+                                  title="Copy phone"
+                                >
+                                  {copiedPhoneId === selectedResume.id ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
+
+                            <span className="text-[11px] text-slate-500">File: {selectedResume.fileName} ({selectedResume.fileSize})</span>
+                          </div>
+                        </div>
+
+                        {/* Circular Suitability Gauge */}
+                        <div className="flex items-center gap-4 bg-slate-950/60 p-4 border border-slate-800/80 rounded-2xl shrink-0">
+                          <div className="relative flex items-center justify-center">
+                            <svg className="w-16 h-16 transform -rotate-90">
+                              <circle cx="32" cy="32" r="28" strokeWidth="4" stroke="rgba(30,41,59,0.8)" fill="transparent" />
+                              <circle 
+                                cx="32" cy="32" r="28" strokeWidth="4" 
+                                stroke={selectedResume.summary.suitabilityScore >= 90 ? "#10b981" : selectedResume.summary.suitabilityScore >= 80 ? "#06b6d4" : "#f59e0b"} 
+                                fill="transparent" 
+                                strokeDasharray={175.9}
+                                strokeDashoffset={175.9 - (175.9 * selectedResume.summary.suitabilityScore) / 100}
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                            <span className="absolute text-sm font-bold font-mono text-white">{selectedResume.summary.suitabilityScore}%</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Match Score</span>
+                            <span className="text-xs text-slate-300 font-medium">Role Compatibility</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    {/* CASE 2: IN PROGRESS */}
-                    <div className="bg-slate-900 p-3.5 rounded-xl border border-sky-500/15 flex flex-col space-y-2">
-                      <div className="flex items-center gap-1.5 text-sky-400 text-xs font-bold uppercase tracking-wider border-b border-slate-950 pb-1.5">
-                        <Clock className="w-3.5 h-3.5 shrink-0 text-sky-400 animate-spin" style={{ animationDuration: "8s" }} />
-                        <span>In Progress</span>
-                        <span className="ml-auto bg-sky-400/10 text-sky-400 text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono">
-                          {(activeTicket || viewingHistoryTicket)!.segregated.inProgress.length}
-                        </span>
+                    {/* Bento-Grid Row 1: Profile Summary & AI Verdict */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                      <div className="md:col-span-7 bg-slate-900/30 border border-slate-900 rounded-3xl p-5 space-y-3.5">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <User className="w-4 h-4 text-teal-500" /> Profile Summary
+                        </h3>
+                        <p className="text-xs text-slate-300 leading-relaxed font-sans font-medium">
+                          {selectedResume.summary.summary}
+                        </p>
                       </div>
 
-                      <div className="space-y-1.5 flex-1 overflow-y-auto max-h-28">
-                        {(activeTicket || viewingHistoryTicket)!.segregated.inProgress.length > 0 ? (
-                          (activeTicket || viewingHistoryTicket)!.segregated.inProgress.map((prog, idx) => (
-                            <div key={idx} className="text-[11px] text-slate-300 flex items-start gap-1 font-sans">
-                              <span className="text-sky-400 select-none">•</span>
-                              <span className="leading-tight">{prog}</span>
+                      <div className="md:col-span-5 bg-teal-500/5 border border-teal-500/10 rounded-3xl p-5 space-y-3">
+                        <h3 className="text-xs font-bold text-teal-400 uppercase tracking-widest flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-teal-400 animate-pulse" /> Recruiter Verdict
+                        </h3>
+                        <p className="text-xs text-teal-200 leading-relaxed font-sans font-semibold">
+                          {selectedResume.summary.verdict}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bento-Grid Row 2: Key Strengths & Skill Cloud */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                      {/* Key Strengths */}
+                      <div className="md:col-span-6 bg-slate-900/30 border border-slate-900 rounded-3xl p-5 space-y-4">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <TrendingUp className="w-4 h-4 text-emerald-400" /> Unique Strengths
+                        </h3>
+
+                        <div className="space-y-3">
+                          {selectedResume.summary.keyStrengths.map((str, idx) => (
+                            <div key={idx} className="flex gap-3 text-xs">
+                              <span className="inline-flex shrink-0 items-center justify-center w-5 h-5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg">
+                                <Check className="w-3.5 h-3.5" />
+                              </span>
+                              <span className="text-slate-300 leading-relaxed font-medium">{str}</span>
                             </div>
-                          ))
-                        ) : (
-                          <div className="text-[10px] text-slate-500 italic mt-2 font-sans">No tasks currently tagged</div>
-                        )}
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Technical Skills Tag Cloud */}
+                      <div className="md:col-span-6 bg-slate-900/30 border border-slate-900 rounded-3xl p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-cyan-400" /> Extracted Skills
+                          </h3>
+                          <span className="text-[10px] text-slate-500 font-mono font-bold">({selectedResume.summary.skills.length} identified)</span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedResume.summary.skills.map((skill, idx) => (
+                            <span 
+                              key={idx}
+                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 hover:border-slate-700 hover:text-teal-400 rounded-xl text-xs font-medium text-slate-300 transition duration-150"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
-                    {/* CASE 3: COMPLETED */}
-                    <div className="bg-slate-900 p-3.5 rounded-xl border border-emerald-500/15 flex flex-col space-y-2">
-                      <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold uppercase tracking-wider border-b border-slate-950 pb-1.5">
-                        <CheckCircle className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-                        <span>Completed</span>
-                        <span className="ml-auto bg-emerald-400/10 text-emerald-400 text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono">
-                          {(activeTicket || viewingHistoryTicket)!.segregated.completed.length}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5 flex-1 overflow-y-auto max-h-28">
-                        {(activeTicket || viewingHistoryTicket)!.segregated.completed.length > 0 ? (
-                          (activeTicket || viewingHistoryTicket)!.segregated.completed.map((comp, idx) => (
-                            <div key={idx} className="text-[11px] text-slate-300 flex items-start gap-1 font-sans">
-                              <span className="text-emerald-500 select-none">•</span>
-                              <span className="leading-tight">{comp}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-[10px] text-slate-500 italic mt-2 font-sans">Zero completions found</div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* CASE 4: TO BE DONE */}
-                    <div className="bg-slate-900 p-3.5 rounded-xl border border-amber-500/15 flex flex-col space-y-2">
-                      <div className="flex items-center gap-1.5 text-amber-500 text-xs font-bold uppercase tracking-wider border-b border-slate-950 pb-1.5">
-                        <ListTodo className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-                        <span>To Be Done</span>
-                        <span className="ml-auto bg-amber-400/10 text-amber-400 text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono">
-                          {(activeTicket || viewingHistoryTicket)!.segregated.toBeDone.length}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5 flex-1 overflow-y-auto max-h-28">
-                        {(activeTicket || viewingHistoryTicket)!.segregated.toBeDone.length > 0 ? (
-                          (activeTicket || viewingHistoryTicket)!.segregated.toBeDone.map((tbd, idx) => (
-                            <div key={idx} className="text-[11px] text-slate-300 flex items-start gap-1 font-sans">
-                              <span className="text-amber-500 select-none">•</span>
-                              <span className="leading-tight">{tbd}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-[10px] text-slate-500 italic mt-2 font-sans">No futures identified</div>
-                        )}
-                      </div>
-                    </div>
-
-                  </div>
-
-                  {viewingHistoryTicket && (
-                    <button
-                      onClick={() => setViewingHistoryTicket(null)}
-                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl border border-slate-700 transition cursor-pointer"
-                    >
-                      Clear Hist. Log Overlay View
-                    </button>
-                  )}
-                </div>
-              )}
-
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT COLUMN: HISTORY OF LAST 50 TICKETS (Cols: 4) */}
-        <div className="lg:col-span-4 flex flex-col space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 flex flex-col space-y-4 flex-1">
-            <div className="space-y-1">
-              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5 text-teal-400 font-bold" />
-                History of Last 50 Tickets
-              </h2>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Centralized logs showing Vikram&apos;s processed daily summaries. Search or click item for details.
-              </p>
-            </div>
-
-            {/* Simple Search bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-              <input
-                type="text"
-                className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-[1px] focus:outline-teal-500"
-                placeholder="Search history by name or keywords..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-
-            {/* List entries */}
-            <div className="space-y-2 flex-1 overflow-y-auto max-h-[450px] pr-1">
-              {filteredHistory.length > 0 ? (
-                filteredHistory.map((tkt, index) => {
-                  const isBeingViewed = viewingHistoryTicket?.id === tkt.id;
-                  const dateStr = new Date(tkt.processedAt).toLocaleTimeString([], { 
-                    hour: "2-digit", 
-                    minute: "2-digit" 
-                  }) + " " + new Date(tkt.processedAt).toLocaleDateString([], { month: "short", day: "numeric" });
-
-                  return (
-                    <div
-                      key={tkt.id}
-                      onClick={() => {
-                        setViewingHistoryTicket(tkt);
-                        // Also auto select their sidebar user if matched
-                        const matchedUser = team.find((u) => u.name.toLowerCase() === tkt.sender.toLowerCase());
-                        if (matchedUser) setSelectedUser(matchedUser);
-                        setActiveTicket(null); // Close active active state in favor of history
-                      }}
-                      className={`p-3.5 rounded-xl border transition-all duration-150 text-left cursor-pointer flex flex-col space-y-1.5 group ${
-                        isBeingViewed
-                          ? "bg-teal-500/10 border-teal-500/60 text-white"
-                          : "bg-slate-950/40 hover:bg-slate-900/40 border-slate-800 text-slate-350"
-                      }`}
-                    >
+                    {/* Professional Work Experience Timeline */}
+                    <div className="bg-slate-900/30 border border-slate-900 rounded-3xl p-6 space-y-5">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-bold block text-white group-hover:text-teal-300 transition">
-                            {tkt.sender}
-                          </span>
-                          <span className="text-[9px] bg-slate-900 border border-slate-800 font-mono text-slate-400 px-1.5 py-0.2 rounded-md">
-                            {tkt.id}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
-                          {dateStr}
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <Briefcase className="w-4 h-4 text-teal-400" /> Work History Timeline
+                        </h3>
+                        <span className="text-[10px] text-teal-400 uppercase font-mono font-bold bg-teal-500/10 border border-teal-500/25 px-2.5 py-0.5 rounded-full">
+                          {selectedResume.summary.experienceYears} Years Estimated Experience
                         </span>
                       </div>
 
-                      <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
-                        {tkt.segregated.summary}
-                      </p>
-
-                      <div className="flex items-center gap-2 pt-1">
-                        <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500 bg-slate-900/80 px-2 py-0.5 rounded-md">
-                          <span className="text-red-400 font-bold">•</span> Blockers: {tkt.segregated.blockers.length}
-                        </div>
-                        <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500 bg-slate-900/80 px-2 py-0.5 rounded-md">
-                          <span className="text-emerald-400 font-bold">•</span> Completed: {tkt.segregated.completed.length}
-                        </div>
-
-                        {/* Delete single historical card button */}
-                        <button
-                          onClick={(e) => deleteTicket(tkt.id, e)}
-                          className="ml-auto p-1 text-slate-500 hover:text-rose-400 transition hover:bg-rose-500/5 rounded-md"
-                          title="Delete summary ticket"
-                        >
-                          <Trash2 className="w-3 h-3 text-red-500" />
-                        </button>
+                      <div className="relative border-l border-slate-800 pl-6 ml-3 space-y-6">
+                        {selectedResume.summary.experienceHistory.map((exp, idx) => (
+                          <div key={idx} className="relative group/timeline">
+                            {/* Dot indicator */}
+                            <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full bg-slate-800 border-2 border-slate-950 group-hover/timeline:bg-teal-400 group-hover/timeline:scale-125 transition duration-150"></span>
+                            
+                            <div className="space-y-1.5 text-left">
+                              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                                <h4 className="text-sm font-bold text-white">{exp.role}</h4>
+                                <span className="text-[10px] font-bold font-mono text-teal-400 bg-teal-500/5 border border-teal-500/10 px-2 py-0.5 rounded">
+                                  {exp.duration}
+                                </span>
+                              </div>
+                              <p className="text-xs font-semibold text-slate-400">{exp.company}</p>
+                              <p className="text-xs text-slate-400 leading-relaxed font-sans">{exp.description}</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  );
-                })
+
+                    {/* Education Details Grid */}
+                    <div className="bg-slate-900/30 border border-slate-900 rounded-3xl p-5 space-y-4">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <GraduationCap className="w-4 h-4 text-indigo-400" /> Academic Background
+                      </h3>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {selectedResume.summary.education.map((edu, idx) => (
+                          <div key={idx} className="p-4 bg-slate-950/80 border border-slate-850 rounded-2xl flex items-start gap-3">
+                            <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
+                              <GraduationCap className="w-4 h-4" />
+                            </div>
+                            <div className="text-left">
+                              <h4 className="text-xs font-bold text-slate-200">{edu.degree}</h4>
+                              <p className="text-xs text-slate-400 mt-0.5">{edu.school}</p>
+                              <span className="text-[10px] text-slate-500 font-mono block mt-1">{edu.year}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-16 border border-slate-900 border-dashed rounded-3xl text-center space-y-4 bg-slate-950/20">
+                    <Info className="w-8 h-8 text-slate-700 mx-auto" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-300">No Candidate Selected</h3>
+                      <p className="text-xs text-slate-500 mt-1">Select an analysed profile from the left sidebar or upload a candidate's resume to begin.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Tab 2: Comparative Side-by-Side Matrix Table */}
+          {activeTab === "matrix" && (
+            <motion.div
+              key="matrix-view"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-slate-900/30 border border-slate-900 rounded-3xl overflow-hidden shadow-xl"
+            >
+              <div className="p-5 border-b border-slate-800 bg-slate-900/40">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-teal-400" /> Candidate Selection Comparison Matrix
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-1">Analyze candidate suitability scores, key skills, experience years, and verdicts side-by-side.</p>
+              </div>
+
+              {filteredResumes.length === 0 ? (
+                <div className="p-16 text-center text-slate-500 text-xs">
+                  No candidates available for comparison. Try uploading or resetting demo seeds.
+                </div>
               ) : (
-                <div className="p-8 text-center bg-slate-950/40 border border-dashed border-slate-800/80 rounded-2xl flex flex-col items-center justify-center space-y-1">
-                  <FileText className="w-6 h-6 text-slate-600 mb-1" />
-                  <p className="text-xs text-slate-500 font-bold">No tickets found</p>
-                  <p className="text-[10px] text-slate-600">Enter a different keyword or process raw updates.</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950/80 border-b border-slate-800 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        <th className="p-4 pl-6">Candidate Name</th>
+                        <th className="p-4 text-center">Score</th>
+                        <th className="p-4 text-center">Years Exp</th>
+                        <th className="p-4">Academic Background</th>
+                        <th className="p-4">Core Skills</th>
+                        <th className="p-4">Gemini Verdict Summary</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80 bg-slate-950/10">
+                      {filteredResumes.map((resume) => (
+                        <tr key={resume.id} className="hover:bg-slate-900/30 transition duration-150">
+                          <td className="p-4 pl-6 font-semibold">
+                            <span className="block text-white font-bold">{resume.summary.candidateName}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">{resume.summary.candidateEmail || resume.fileName}</span>
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`inline-block px-2.5 py-0.5 rounded font-bold font-mono border ${getScoreColor(resume.summary.suitabilityScore)}`}>
+                              {resume.summary.suitabilityScore}%
+                            </span>
+                          </td>
+                          <td className="p-4 text-center font-mono font-bold text-slate-300">
+                            {resume.summary.experienceYears} Years
+                          </td>
+                          <td className="p-4 max-w-xs truncate" title={resume.summary.education.map(e => `${e.degree} (${e.school})`).join(", ")}>
+                            {resume.summary.education[0] ? (
+                              <div className="space-y-0.5">
+                                <span className="font-medium text-slate-200">{resume.summary.education[0].degree}</span>
+                                <span className="block text-[10px] text-slate-500">{resume.summary.education[0].school}</span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-600">-</span>
+                            )}
+                          </td>
+                          <td className="p-4 max-w-sm">
+                            <div className="flex flex-wrap gap-1">
+                              {resume.summary.skills.slice(0, 5).map((skill, sIdx) => (
+                                <span key={sIdx} className="bg-slate-900 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-medium border border-slate-800">
+                                  {skill}
+                                </span>
+                              ))}
+                              {resume.summary.skills.length > 5 && (
+                                <span className="text-[10px] text-slate-500 font-bold pl-1">
+                                  +{resume.summary.skills.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-400 max-w-md font-sans leading-relaxed">
+                            {resume.summary.verdict}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
-      {/* Footer Branding Area */}
-      <footer className="bg-slate-900 border-t border-slate-800 py-3.5 px-6 mt-12">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-slate-500 font-mono">
-          <div>
-            <span>Daily Standup Summarizer Panel</span>
-            <span className="mx-2">•</span>
-            <span>Created for Vikram &amp; His Team of 8 Engineers</span>
-          </div>
-          <div>
-            <span>Admin Control Panel • Active Cloud Node</span>
-          </div>
-        </div>
+      {/* Humble footer */}
+      <footer className="border-t border-slate-900/60 py-6 text-center text-[11px] text-slate-600 font-mono mt-12">
+        <span>System Status: Fully Operational</span>
+        <span className="mx-2">•</span>
+        <span>Made with Gemini 3.5 Flash</span>
       </footer>
     </div>
   );

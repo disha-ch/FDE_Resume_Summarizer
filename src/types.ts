@@ -1,30 +1,34 @@
-export interface RawMessage {
-  id: string;
-  sender: string;
-  text: string;
-  timestamp: string;
-  keyword: "BLOCKER" | "TO BE DONE" | "Completed" | "IN PROGRESS" | string;
+export interface Education {
+  degree: string;
+  school: string;
+  year: string;
 }
 
-export interface SegregatedResult {
-  blockers: string[];
-  toBeDone: string[];
-  completed: string[];
-  inProgress: string[];
+export interface Experience {
+  role: string;
+  company: string;
+  duration: string;
+  description: string;
+}
+
+export interface ResumeSummary {
+  candidateName: string;
+  candidateEmail: string;
+  candidatePhone: string;
+  skills: string[];
+  experienceYears: number;
   summary: string;
+  education: Education[];
+  experienceHistory: Experience[];
+  keyStrengths: string[];
+  verdict: string;
+  suitabilityScore: number;
 }
 
-export interface Ticket {
-  id: string; // e.g., "STND-20260620-01"
-  sender: string;
-  processedAt: string;
-  rawMessages: RawMessage[];
-  segregated: SegregatedResult;
-}
-
-export interface TeamMember {
+export interface ResumeAnalysis {
   id: string;
-  name: string;
-  avatar: string;
-  initialCount: number;
+  fileName: string;
+  fileSize: string;
+  uploadedAt: string;
+  summary: ResumeSummary;
 }
